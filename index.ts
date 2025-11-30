@@ -1,10 +1,12 @@
 // Components
 export { Draggable } from "./components/Draggable";
+export { DragOverlay } from "./components/DragOverlay";
 export { Droppable } from "./components/Droppable";
 export { Sortable } from "./components/Sortable";
 export { SortableItem } from "./components/SortableItem";
 
 // Context
+export { DragOverlayProvider, useDragOverlay } from "./context/DragOverlayContext";
 export { DropProvider } from "./context/DropContext";
 
 // Types
