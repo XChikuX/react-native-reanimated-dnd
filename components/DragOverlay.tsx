@@ -109,6 +109,7 @@ export const DragOverlay = <TData = any>({
   }, [activeDraggableId, isVisible]);
 
   const animatedStyle = useAnimatedStyle(() => {
+    'worklet';
     const visible = isVisible.value === 1;
     
     return {
@@ -118,10 +119,8 @@ export const DragOverlay = <TData = any>({
         { translateX: sharedX.value },
         { translateY: sharedY.value },
         { scale: 1.15 }, // Larger scale for better visibility
-      ],
+      ] as const,
       opacity: visible ? 1.0 : 0, // Control visibility with opacity for instant updates
-      // Hide completely when not visible to avoid touch interference
-      pointerEvents: visible ? 'auto' : 'none',
     };
   });
 

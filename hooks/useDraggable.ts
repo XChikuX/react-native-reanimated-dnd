@@ -198,9 +198,10 @@ export const useDraggable = <TData = unknown>(
         }
 
         // Check children recursively
-        if (child.props && child.props.children) {
+        const childProps = child.props as { children?: React.ReactNode };
+        if (childProps && childProps.children) {
           if (
-            React.Children.toArray(child.props.children).some(checkForHandle)
+            React.Children.toArray(childProps.children).some(checkForHandle)
           ) {
             return true;
           }

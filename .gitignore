@@ -5,7 +5,8 @@ yarn-debug.log*
 yarn-error.log*
 
 # Build output
-lib/
+# Note: lib/ is NOT gitignored to allow direct GitHub installation for Expo
+# lib/
 dist/
 build/
 
