@@ -1,41 +1,40 @@
 // hooks/useDraggable.ts
 import React, {
-    useCallback,
-    useContext,
-    useEffect,
-    useRef,
-    useState,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
 import { LayoutChangeEvent } from "react-native";
 import {
-    Gesture,
-    GestureType,
-    PanGestureHandlerEventPayload,
+  Gesture,
+  GestureType,
+  PanGestureHandlerEventPayload,
 } from "react-native-gesture-handler";
 import Animated, {
-    measure,
-    runOnJS,
-    runOnUI,
-    useAnimatedReaction,
-    useAnimatedRef,
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring
+  measure,
+  useAnimatedReaction,
+  useAnimatedRef,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
 } from "react-native-reanimated";
+import { scheduleOnRN, scheduleOnUI } from "react-native-worklets";
 import { useDragOverlay } from "../context/DragOverlayContext";
 import {
-    DropAlignment,
-    DropOffset,
-    DropSlot,
-    SlotsContext,
-    SlotsContextValue,
+  DropAlignment,
+  DropOffset,
+  DropSlot,
+  SlotsContext,
+  SlotsContextValue,
 } from "../types/context";
 import {
-    AnimationFunction,
-    CollisionAlgorithm,
-    DraggableState,
-    UseDraggableOptions,
-    UseDraggableReturn,
+  AnimationFunction,
+  CollisionAlgorithm,
+  DraggableState,
+  UseDraggableOptions,
+  UseDraggableReturn,
 } from "../types/draggable";
 
 /**
@@ -271,8 +270,7 @@ export const useDraggable = <TData = unknown>(
   }, [dragAxis, dragAxisShared]);
 
   const updateDraggablePosition = useCallback(() => {
-    runOnUI(() => {
-      "worklet";
+    scheduleOnUI(() => {
       const measurement = measure(animatedViewRef);
       if (measurement === null) {
         return;
@@ -294,7 +292,7 @@ export const useDraggable = <TData = unknown>(
       if (!isOriginSet.current) {
         isOriginSet.current = true;
       }
-    })();
+    });
   }, [animatedViewRef, originX, originY, itemW, itemH, tx, ty]);
 
   // Worklet version for use within UI thread contexts
@@ -333,8 +331,7 @@ export const useDraggable = <TData = unknown>(
           width > 0 &&
           height > 0
         ) {
-          runOnUI(() => {
-            "worklet";
+          scheduleOnUI(() => {
             boundsX.value = pageX;
             boundsY.value = pageY;
             boundsWidth.value = width;
@@ -342,7 +339,7 @@ export const useDraggable = <TData = unknown>(
             if (!boundsAreSet.value) {
               boundsAreSet.value = true;
             }
-          })();
+          });
         } else {
           console.warn(
             "useDraggable: dragBoundsRef measurement failed or returned invalid dimensions. Bounds may be stale or item unbounded."
@@ -350,12 +347,11 @@ export const useDraggable = <TData = unknown>(
         }
       });
     } else {
-      runOnUI(() => {
-        "worklet";
+      scheduleOnUI(() => {
         if (boundsAreSet.value) {
           boundsAreSet.value = false;
         }
-      })();
+      });
     }
   }, [
     dragBoundsRef,
@@ -491,16 +487,17 @@ export const useDraggable = <TData = unknown>(
 
       if (hitSlotData && hitSlotId !== null) {
         if (hitSlotData.onDrop) {
-          runOnJS(hitSlotData.onDrop)(draggableData);
+          scheduleOnRN(hitSlotData.onDrop, draggableData);
         }
 
-        runOnJS(registerDroppedItem)(
+        scheduleOnRN(
+          registerDroppedItem,
           internalDraggableId,
           hitSlotData.id,
           draggableData
         );
 
-        runOnJS(setState)(DraggableState.DROPPED);
+        scheduleOnRN(setState, DraggableState.DROPPED);
 
         const alignment: DropAlignment = hitSlotData.dropAlignment || "center";
         const offset: DropOffset = hitSlotData.dropOffset || { x: 0, y: 0 };
@@ -560,11 +557,11 @@ export const useDraggable = <TData = unknown>(
         finalTxValue = 0;
         finalTyValue = 0;
 
-        runOnJS(setState)(DraggableState.IDLE);
-        runOnJS(unregisterDroppedItem)(internalDraggableId);
+        scheduleOnRN(setState, DraggableState.IDLE);
+        scheduleOnRN(unregisterDroppedItem, internalDraggableId);
       }
 
-      runOnUI(animateDragEndPosition)(finalTxValue, finalTyValue);
+      scheduleOnUI(animateDragEndPosition, finalTxValue, finalTyValue);
     },
     [
       getSlots,
@@ -643,7 +640,7 @@ export const useDraggable = <TData = unknown>(
           isDraggingShared.value = 1;
           
           // Update state to DRAGGING when drag begins (for JS thread callbacks)
-          runOnJS(setState)(DraggableState.DRAGGING);
+          scheduleOnRN(setState, DraggableState.DRAGGING);
           
           // HYBRID: Use DragOverlay if available, otherwise rely on z-index
           if (useDragOverlaySystem) {
@@ -651,15 +648,15 @@ export const useDraggable = <TData = unknown>(
             // This ensures the overlay appears exactly where the item is
             const initialX = originX.value;
             const initialY = originY.value;
-            runOnJS(showDragOverlay)(
+            scheduleOnRN(showDragOverlay,
               draggableId || `draggable-${Date.now()}`,
               data,
               { x: initialX, y: initialY } // Use actual screen position
             );
           }
           
-          if (onDragStart) runOnJS(onDragStart)(data);
-          if (contextOnDragStart) runOnJS(contextOnDragStart)(data);
+          if (onDragStart) scheduleOnRN(onDragStart, data);
+          if (contextOnDragStart) scheduleOnRN(contextOnDragStart, data);
         })
         .onUpdate((event: PanGestureHandlerEventPayload) => {
           "worklet";
@@ -687,7 +684,7 @@ export const useDraggable = <TData = unknown>(
             ty.value = newTy;
           }
           if (onDragging) {
-            runOnJS(onDragging)({
+            scheduleOnRN(onDragging, {
               x: originX.value,
               y: originY.value,
               tx: tx.value,
@@ -696,7 +693,7 @@ export const useDraggable = <TData = unknown>(
             });
           }
           if (contextOnDragging) {
-            runOnJS(contextOnDragging)({
+            scheduleOnRN(contextOnDragging, {
               x: originX.value,
               y: originY.value,
               tx: tx.value,
@@ -710,13 +707,14 @@ export const useDraggable = <TData = unknown>(
             const currentPageX = originX.value + tx.value;
             const currentPageY = originY.value + ty.value;
             
-            runOnJS(updateDragOverlayPosition)({
+            scheduleOnRN(updateDragOverlayPosition, {
               x: currentPageX,
               y: currentPageY,
             });
           }
           
-          runOnJS(updateHoverState)(
+          scheduleOnRN(
+            updateHoverState,
             tx.value,
             ty.value,
             originX.value,
@@ -735,12 +733,13 @@ export const useDraggable = <TData = unknown>(
           
           // Hide the drag overlay when drag ends
           if (useDragOverlaySystem) {
-            runOnJS(hideDragOverlay)();
+            scheduleOnRN(hideDragOverlay);
           }
           
-          if (onDragEnd) runOnJS(onDragEnd)(data);
-          if (contextOnDragEnd) runOnJS(contextOnDragEnd)(data);
-          runOnJS(processDropAndAnimate)(
+          if (onDragEnd) scheduleOnRN(onDragEnd, data);
+          if (contextOnDragEnd) scheduleOnRN(contextOnDragEnd, data);
+          scheduleOnRN(
+            processDropAndAnimate,
             tx.value,
             ty.value,
             data,
@@ -749,7 +748,7 @@ export const useDraggable = <TData = unknown>(
             itemW.value,
             itemH.value
           );
-          runOnJS(setActiveHoverSlot)(null);
+          scheduleOnRN(setActiveHoverSlot, null);
         }),
     [
       dragDisabledShared,
@@ -815,12 +814,12 @@ export const useDraggable = <TData = unknown>(
       if (result.isZero && previous && !previous.isZero) {
         // Reset dragging state immediately on UI thread
         isDraggingShared.value = 0;
-        // Use runOnJS to call setState from the UI thread
-        runOnJS(setState)(DraggableState.IDLE);
+        // Use scheduleOnRN to call setState from the UI thread
+        scheduleOnRN(setState, DraggableState.IDLE);
         // When returning to origin position, we know we're no longer dropped
-        runOnJS(unregisterDroppedItem)(internalDraggableId);
+        scheduleOnRN(unregisterDroppedItem, internalDraggableId);
         // Hide the drag overlay when drag is complete
-        runOnJS(hideDragOverlay)();
+        scheduleOnRN(hideDragOverlay);
       }
     },
     [setState, unregisterDroppedItem, internalDraggableId, hideDragOverlay]

@@ -1,22 +1,12 @@
-import React, {
-  useRef,
-  useEffect,
-  useContext,
-  useCallback,
-  useMemo,
-} from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { LayoutChangeEvent, StyleSheet } from "react-native";
-import Animated, {
-  useAnimatedRef,
-  measure,
-  runOnUI,
-  runOnJS,
-} from "react-native-reanimated";
+import Animated, { measure, useAnimatedRef } from "react-native-reanimated";
+import { scheduleOnRN, scheduleOnUI } from "react-native-worklets";
 import {
-  SlotsContext,
-  SlotsContextValue,
   DropAlignment,
   DropOffset,
+  SlotsContext,
+  SlotsContextValue,
 } from "../types/context";
 import { UseDroppableOptions, UseDroppableReturn } from "../types/droppable";
 
@@ -162,6 +152,7 @@ export const useDroppable = <TData = unknown>(
     dropAlignment,
     dropOffset,
     activeStyle,
+    draggingStyle,
     droppableId,
     capacity,
   } = options;
@@ -180,6 +171,7 @@ export const useDroppable = <TData = unknown>(
     unregister,
     isRegistered,
     activeHoverSlotId: contextActiveHoverSlotId,
+    isDragging,
     registerPositionUpdateListener,
     unregisterPositionUpdateListener,
   } = useContext(SlotsContext) as SlotsContextValue<TData>;
@@ -212,31 +204,80 @@ export const useDroppable = <TData = unknown>(
     };
   }, [isActive, activeStyle]);
 
+  // Process dragging style to separate transforms from other styles
+  const { processedDraggingStyle, draggingTransforms } = useMemo(() => {
+    if (!isDragging || !draggingStyle) {
+      return { processedDraggingStyle: null, draggingTransforms: [] };
+    }
+
+    const flattenedStyle = StyleSheet.flatten(draggingStyle);
+    let processedStyle = { ...flattenedStyle };
+    let transforms: any[] = [];
+
+    // Extract and process transforms if present
+    if (flattenedStyle.transform) {
+      if (Array.isArray(flattenedStyle.transform)) {
+        transforms = [...flattenedStyle.transform];
+      }
+
+      // Remove transform from the main style to avoid conflicts
+      delete processedStyle.transform;
+    }
+
+    return {
+      processedDraggingStyle: processedStyle,
+      draggingTransforms: transforms,
+    };
+  }, [isDragging, draggingStyle]);
+
   // Create the final style with transforms properly handled
   const combinedActiveStyle = useMemo(() => {
-    if (!isActive || !activeStyle) {
+    if ((!isActive || !activeStyle) && (!isDragging || !draggingStyle)) {
       return undefined;
     }
 
+    let currentStyle = [];
+    let currentTransforms = [];
+
+    if (isDragging && draggingStyle) {
+      currentStyle.push(processedDraggingStyle);
+      currentTransforms = [...currentTransforms, ...draggingTransforms];
+    }
+
+    if (isActive && activeStyle) {
+      currentStyle.push(processedActiveStyle);
+      currentTransforms = [...currentTransforms, ...activeTransforms];
+    }
+
+    const aggregateStyle = StyleSheet.flatten(currentStyle);
+
     // If there are no transforms, just return the processed style
-    if (activeTransforms.length === 0) {
-      return processedActiveStyle;
+    if (currentTransforms.length === 0) {
+      return aggregateStyle;
     }
 
     // Add transforms to the style
     return {
-      ...processedActiveStyle,
-      transform: activeTransforms,
+      ...aggregateStyle,
+      transform: currentTransforms,
     };
-  }, [isActive, activeStyle, processedActiveStyle, activeTransforms]);
+  }, [
+    isActive,
+    activeStyle,
+    processedActiveStyle,
+    activeTransforms,
+    isDragging,
+    draggingStyle,
+    processedDraggingStyle,
+    draggingTransforms,
+  ]);
 
   useEffect(() => {
     onActiveChange?.(isActive);
   }, [isActive, onActiveChange]);
 
   const updateDroppablePosition = useCallback(() => {
-    runOnUI(() => {
-      "worklet";
+    scheduleOnUI(() => {
       const measurement = measure(animatedViewRef);
       if (measurement === null) {
         return;
@@ -244,7 +285,7 @@ export const useDroppable = <TData = unknown>(
 
       if (measurement.width > 0 && measurement.height > 0) {
         // Ensure valid dimensions before registering
-        runOnJS(register)(id, {
+        scheduleOnRN(register, id, {
           id: droppableId || `droppable-${id}`,
           x: measurement.pageX,
           y: measurement.pageY,
@@ -256,7 +297,7 @@ export const useDroppable = <TData = unknown>(
           capacity,
         });
       }
-    })();
+    });
   }, [
     id,
     droppableId,
@@ -316,6 +357,7 @@ export const useDroppable = <TData = unknown>(
       style: combinedActiveStyle,
     },
     isActive,
+    isDragging,
     activeStyle,
     animatedViewRef,
   };
