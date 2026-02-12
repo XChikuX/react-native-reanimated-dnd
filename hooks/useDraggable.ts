@@ -21,6 +21,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { scheduleOnRN, scheduleOnUI } from "react-native-worklets";
+import { useDragOverlay } from "../context/DragOverlayContext";
 import {
   DropAlignment,
   DropOffset,
@@ -163,6 +164,24 @@ export const useDraggable = <TData = unknown>(
   const [state, setState] = useState<DraggableState>(DraggableState.IDLE);
   const [hasHandle, setHasHandle] = useState(false);
 
+    // HYBRID APPROACH: Use DragOverlay only when available, fallback to z-index
+    let showDragOverlay, hideDragOverlay, updateDragOverlayPosition;
+    let useDragOverlaySystem = false;
+    
+    try {
+      const overlayContext = useDragOverlay();
+      showDragOverlay = overlayContext.showDragOverlay;
+      hideDragOverlay = overlayContext.hideDragOverlay;
+      updateDragOverlayPosition = overlayContext.updateDragOverlayPosition;
+      useDragOverlaySystem = true;
+    } catch (error: any) {
+      // DragOverlay system not available, fallback to z-index approach
+      showDragOverlay = () => {};
+      hideDragOverlay = () => {};
+      updateDragOverlayPosition = () => {};
+      useDragOverlaySystem = false;
+    }
+
   // Check if any child is a Handle component
   useEffect(() => {
     if (!children || !handleComponent) {
@@ -179,9 +198,10 @@ export const useDraggable = <TData = unknown>(
         }
 
         // Check children recursively
-        if (child.props && child.props.children) {
+        const childProps = child.props as { children?: React.ReactNode };
+        if (childProps && childProps.children) {
           if (
-            React.Children.toArray(child.props.children).some(checkForHandle)
+            React.Children.toArray(childProps.children).some(checkForHandle)
           ) {
             return true;
           }
@@ -193,10 +213,7 @@ export const useDraggable = <TData = unknown>(
     setHasHandle(React.Children.toArray(children).some(checkForHandle));
   }, [children, handleComponent]);
 
-  useEffect(() => {
-    onStateChange?.(state);
-  }, [state, onStateChange]);
-
+  // Shared values MUST be declared before any useEffect that uses them
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
   const offsetX = useSharedValue(0);
@@ -204,6 +221,13 @@ export const useDraggable = <TData = unknown>(
   const dragDisabledShared = useSharedValue(dragDisabled);
   const dragAxisShared = useSharedValue(dragAxis);
   const preDragDelayShared = useSharedValue(preDragDelay);
+  const isDraggingShared = useSharedValue(0); // Track dragging state for worklets (0 = not dragging, 1 = dragging)
+  
+  useEffect(() => {
+    onStateChange?.(state);
+    // Keep shared value in sync with React state for worklets
+    isDraggingShared.value = state === DraggableState.DRAGGING ? 1 : 0;
+  }, [state, onStateChange, isDraggingShared]);
 
   const originX = useSharedValue(0);
   const originY = useSharedValue(0);
@@ -601,7 +625,7 @@ export const useDraggable = <TData = unknown>(
   const gesture = React.useMemo<GestureType>(
     () =>
       Gesture.Pan()
-        .activateAfterLongPress(preDragDelay)
+        .activateAfterLongPress(preDragDelay > 0 ? preDragDelay : undefined)
         // We use onStart to detect the initial drag start after the preDragDelay
         .onStart(() => {
           "worklet";
@@ -610,8 +634,28 @@ export const useDraggable = <TData = unknown>(
           if (dragDisabledShared.value) return;
           offsetX.value = tx.value;
           offsetY.value = ty.value;
-          // Update state to DRAGGING when drag begins
+          
+          // CRITICAL: Set dragging state immediately on UI thread to hide original item instantly
+          // This prevents the brief flash on Android where the original item might show
+          // before the Modal overlay appears
+          isDraggingShared.value = 1;
+          
+          // Update state to DRAGGING when drag begins (for JS thread callbacks)
           scheduleOnRN(setState, DraggableState.DRAGGING);
+          
+          // HYBRID: Use DragOverlay if available, otherwise rely on z-index
+          if (useDragOverlaySystem) {
+            // Use the actual screen position (origin) as initial position
+            // This ensures the overlay appears exactly where the item is
+            const initialX = originX.value;
+            const initialY = originY.value;
+            scheduleOnRN(showDragOverlay,
+              draggableId || `draggable-${Date.now()}`,
+              data,
+              { x: initialX, y: initialY } // Use actual screen position
+            );
+          }
+          
           if (onDragStart) scheduleOnRN(onDragStart, data);
           if (contextOnDragStart) scheduleOnRN(contextOnDragStart, data);
         })
@@ -658,6 +702,18 @@ export const useDraggable = <TData = unknown>(
               itemData: data,
             });
           }
+          // Update drag overlay position using origin + translation
+          if (useDragOverlaySystem) {
+            // Use absolute position: where the card started + how much it moved
+            const currentPageX = originX.value + tx.value;
+            const currentPageY = originY.value + ty.value;
+            
+            scheduleOnRN(updateDragOverlayPosition, {
+              x: currentPageX,
+              y: currentPageY,
+            });
+          }
+          
           scheduleOnRN(
             updateHoverState,
             tx.value,
@@ -671,6 +727,16 @@ export const useDraggable = <TData = unknown>(
         .onEnd(() => {
           "worklet";
           if (dragDisabledShared.value) return;
+          
+          // CRITICAL: Reset dragging state immediately on UI thread
+          // This ensures the original item becomes visible again instantly
+          isDraggingShared.value = 0;
+          
+          // Hide the drag overlay when drag ends
+          if (useDragOverlaySystem) {
+            scheduleOnRN(hideDragOverlay);
+          }
+          
           if (onDragEnd) scheduleOnRN(onDragEnd, data);
           if (contextOnDragEnd) scheduleOnRN(contextOnDragEnd, data);
           scheduleOnRN(
@@ -714,15 +780,24 @@ export const useDraggable = <TData = unknown>(
       contextOnDragging,
       contextOnDragStart,
       contextOnDragEnd,
+      isDraggingShared,
     ]
   );
 
   const animatedStyleProp = useAnimatedStyle(() => {
     "worklet";
+    const isDragging = isDraggingShared.value === 1;
+    const shouldHide = useDragOverlaySystem && isDragging;
+    
+    // When using DragOverlay system, hide the original card completely
+    // When NOT using DragOverlay, raise z-index for stacking
     return {
       transform: [{ translateX: tx.value }, { translateY: ty.value }] as const,
+      opacity: shouldHide ? 0 : 1,  // Hide original when dragging with overlay
+      zIndex: !useDragOverlaySystem && isDragging ? 9999 : 1,
+      elevation: !useDragOverlaySystem && isDragging ? 9999 : 1,
     };
-  }, [tx, ty]);
+  }, [tx, ty, isDraggingShared, useDragOverlaySystem]);
 
   // Replace the React useEffect with useAnimatedReaction to properly handle shared values
   useAnimatedReaction(
@@ -738,13 +813,17 @@ export const useDraggable = <TData = unknown>(
     (result, previous) => {
       // Only trigger when values change to zero (returned to original position)
       if (result.isZero && previous && !previous.isZero) {
+        // Reset dragging state immediately on UI thread
+        isDraggingShared.value = 0;
         // Use scheduleOnRN to call setState from the UI thread
         scheduleOnRN(setState, DraggableState.IDLE);
         // When returning to origin position, we know we're no longer dropped
         scheduleOnRN(unregisterDroppedItem, internalDraggableId);
+        // Hide the drag overlay when drag is complete
+        scheduleOnRN(hideDragOverlay);
       }
     },
-    [setState, unregisterDroppedItem, internalDraggableId]
+    [setState, unregisterDroppedItem, internalDraggableId, hideDragOverlay]
   );
 
   // Clean up on unmount

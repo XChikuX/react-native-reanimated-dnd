@@ -142,6 +142,13 @@ const examples: Example[] = [
     component: "CustomDraggableExample",
     icon: "⚙️",
   },
+  {
+    id: "dragOverlay",
+    title: "Drag Overlay",
+    description: "Optional overlay system for smooth root-level dragging",
+    component: "DragOverlayExample",
+    icon: "🎭",
+  },
 ];
 
 interface ExamplesNavigationPageProps {

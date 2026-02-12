@@ -1,16 +1,15 @@
 // Node Modules
-import React, { useRef, createContext, useContext, useState } from "react";
-import { ViewStyle, StyleProp } from "react-native";
-import Animated from "react-native-reanimated";
+import React, { createContext, useContext } from "react";
 import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { useDraggable } from "../hooks/useDraggable";
 import {
-  UseDraggableOptions,
-  CollisionAlgorithm,
-  DraggableState,
-  DraggableContextValue,
-  DraggableHandleProps,
-  DraggableProps,
+    CollisionAlgorithm,
+    DraggableContextValue,
+    DraggableHandleProps,
+    DraggableProps,
+    DraggableState,
+    UseDraggableOptions,
 } from "../types/draggable";
 
 // Create a context to share gesture and state between Draggable and Handle
