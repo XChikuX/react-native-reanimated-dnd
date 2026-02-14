@@ -629,12 +629,16 @@ export const useDraggable = <TData = unknown>(
         // We use onStart to detect the initial drag start after the preDragDelay
         .onStart(() => {
           "worklet";
-          //first update the position
-          updateDraggablePositionWorklet();
+          // iOS FIX: Do NOT call measure() inside gesture handler worklet
+          // Calling measure() from within a worklet during gesture handling causes crashes on iOS
+          // when dragging over other elements. The position values (originX, originY, itemW, itemH)
+          // are already updated via layout listeners, so we can safely use them here.
+          // updateDraggablePositionWorklet(); // REMOVED - causes iOS crash
+
           if (dragDisabledShared.value) return;
           offsetX.value = tx.value;
           offsetY.value = ty.value;
-          
+
           // CRITICAL: Set dragging state immediately on UI thread to hide original item instantly
           // This prevents the brief flash on Android where the original item might show
           // before the Modal overlay appears
@@ -776,7 +780,7 @@ export const useDraggable = <TData = unknown>(
       boundsHeight,
       dragAxisShared,
       setState,
-      updateDraggablePositionWorklet,
+      // updateDraggablePositionWorklet, // REMOVED - no longer called in gesture (iOS crash fix)
       contextOnDragging,
       contextOnDragStart,
       contextOnDragEnd,
